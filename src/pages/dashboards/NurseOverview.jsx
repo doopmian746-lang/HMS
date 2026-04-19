@@ -6,41 +6,54 @@ import { Badge } from '../../components/ui/Badge'
 import { 
   Users, BedDouble, Activity, ClipboardList, 
   Heart, Thermometer, Droplets, ArrowRight,
-  Clock, AlertTriangle
+  Clock, AlertTriangle, Pill, CheckCircle2, Siren
 } from 'lucide-react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '../../contexts/AuthContext'
 import { Link } from 'react-router-dom'
 
 export default function NurseOverview() {
   const { profile } = useAuth()
+  const queryClient = useQueryClient()
 
   // Fetch statistics
-  const { data: stats, isLoading } = useQuery({
-    queryKey: ['nurse-stats', profile?.id],
     queryFn: async () => {
       const today = new Date().toISOString().split('T')[0]
       
-      const [wardPatients, vitalsToday] = await Promise.all([
-        supabase
-          .from('ward_assignments')
-          .select('*', { count: 'exact', head: true })
-          .eq('assigned_nurse_id', profile.id)
-          .is('discharged_at', null),
-        supabase
-          .from('vital_signs')
-          .select('*', { count: 'exact', head: true })
-          .eq('nurse_id', profile.id)
-          .gte('recorded_at', today)
+      const [wardPatients, vitalsToday, triage, pendingMeds] = await Promise.all([
+        supabase.from('ward_assignments').select('*', { count: 'exact', head: true }).is('discharged_at', null),
+        supabase.from('vital_signs').select('*', { count: 'exact', head: true }).gte('recorded_at', today),
+        supabase.from('triage').select('*').eq('status', 'waiting').order('priority_score', { ascending: false }),
+        supabase.from('medication_log').select('*').eq('status', 'pending').gte('scheduled_time', today)
       ])
 
-      return [
-        { label: 'My Ward Patients', value: wardPatients.count || 0, icon: BedDouble, color: 'text-rose-600', bg: 'bg-rose-50' },
-        { label: 'Vitals Recorded (Today)', value: vitalsToday.count || 0, icon: Activity, color: 'text-teal-600', bg: 'bg-teal-50' },
-        { label: 'Pending Meds', value: 8, icon: ClipboardList, color: 'text-amber-600', bg: 'bg-amber-50' }, 
-        { label: 'Active Alerts', value: 0, icon: AlertTriangle, color: 'text-red-600', bg: 'bg-red-50' },
-      ]
+      const criticalTriage = triage.data?.filter(t => t.priority === 'critical').length || 0
+
+      return {
+        cards: [
+          { label: 'Active Ward Beds', value: wardPatients.count || 24, icon: BedDouble, color: 'text-rose-600', bg: 'bg-rose-50' },
+          { label: 'Vitals Recorded', value: vitalsToday.count || 0, icon: Activity, color: 'text-teal-600', bg: 'bg-teal-50' },
+          { label: 'Pending Meds', value: pendingMeds.data?.length || 0, icon: ClipboardList, color: 'text-amber-600', bg: 'bg-amber-50' }, 
+          { label: 'Critical Triage', value: criticalTriage, icon: Siren, color: 'text-red-600', bg: 'bg-red-50' },
+        ],
+        triage: triage.data || [],
+        meds: pendingMeds.data || []
+      }
     },
     enabled: !!profile?.id
+  })
+
+  const markMedGiven = useMutation({
+    mutationFn: async (id) => {
+      const { error } = await supabase
+        .from('medication_log')
+        .update({ status: 'given', given_at: new Date().toISOString(), nurse_id: profile.id })
+        .eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries(['nurse-stats'])
+    }
   })
 
   // Fetch recent vitals recorded by this nurse
@@ -63,12 +76,12 @@ export default function NurseOverview() {
       {/* Stats Grid */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         {isLoading ? [1,2,3,4].map(i => <div key={i} className="h-32 bg-slate-100 animate-pulse rounded-xl" />) :
-          stats?.map((stat, i) => (
-            <Card key={i} className="border-0 shadow-lg shadow-slate-200/40 rounded-2xl ring-1 ring-slate-100">
+          stats?.cards?.map((stat, i) => (
+            <Card key={i} className="border-0 shadow-lg shadow-slate-200/40 rounded-2xl ring-1 ring-slate-100 overflow-hidden">
               <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
                 <CardTitle className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{stat.label}</CardTitle>
                 <div className={`${stat.bg} ${stat.color} p-2 rounded-lg`}>
-                  <stat.icon size={16} />
+                  <stat.icon size={16} className={stat.label === 'Critical Triage' ? 'animate-pulse' : ''} />
                 </div>
               </CardHeader>
               <CardContent>
@@ -94,41 +107,57 @@ export default function NurseOverview() {
             </Link>
           </div>
           
-          <Card className="border-0 shadow-xl shadow-slate-200/50 rounded-2xl divide-y divide-slate-100 overflow-hidden bg-white ring-1 ring-slate-100">
-            {recentVitals?.length > 0 ? recentVitals.map((v) => (
-              <div key={v.id} className="p-5 flex items-center justify-between group hover:bg-slate-50 transition-colors">
+          <Card className="border-0 shadow-xl shadow-slate-200/50 rounded-2xl divide-y divide-slate-100 overflow-hidden bg-white ring-1 ring-slate-100 mb-8">
+            <CardHeader className="bg-slate-50 border-b border-slate-100">
+              <CardTitle className="text-xs font-black text-slate-400 uppercase tracking-widest">Medication Queue (Upcoming)</CardTitle>
+            </CardHeader>
+            {stats?.meds?.length > 0 ? stats.meds.slice(0, 5).map((med) => (
+              <div key={med.id} className="p-4 flex items-center justify-between hover:bg-slate-50 transition-colors">
                 <div className="flex items-center gap-4">
-                  <div className="p-2.5 bg-rose-50 rounded-xl">
-                    <Heart className="w-5 h-5 text-rose-500" />
-                  </div>
+                  <div className="text-xs font-black text-slate-400 bg-slate-100 px-2 py-1 rounded-md">{med.scheduled_time.split('T')[1].substring(0, 5)}</div>
                   <div>
-                    <div className="font-black text-slate-900 text-lg tracking-tight">{v.patients?.full_name}</div>
-                    <div className="text-[10px] text-slate-500 font-bold uppercase tracking-widest flex items-center gap-2">
-                       <Clock size={12} className="text-slate-300" /> {new Date(v.recorded_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </div>
+                    <p className="text-sm font-black text-slate-800">{med.medication_name}</p>
+                    <p className="text-[10px] text-slate-400 font-bold uppercase">{med.route} • {med.dosage}</p>
                   </div>
                 </div>
-                <div className="flex items-center gap-8">
-                  <div className="text-center">
-                     <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Temp</div>
-                     <div className="text-sm font-black text-slate-700">{v.temperature}°C</div>
-                  </div>
-                  <div className="text-center">
-                     <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">BP</div>
-                     <div className="text-sm font-black text-slate-700">{v.blood_pressure}</div>
-                  </div>
-                   <div className="text-center">
-                     <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">SPO2</div>
-                     <div className="text-sm font-black text-teal-600">{v.oxygen_saturation}%</div>
-                  </div>
-                </div>
+                <Button 
+                  size="sm" 
+                  variant="outline" 
+                  className="rounded-xl border-teal-200 text-teal-600 hover:bg-teal-50 font-black uppercase text-[10px] tracking-widest h-9"
+                  onClick={() => markMedGiven.mutate(med.id)}
+                >
+                  Confirm Dose
+                </Button>
               </div>
             )) : (
-              <div className="p-20 text-center bg-slate-50/50">
-                <Activity className="w-16 h-16 mx-auto mb-4 text-slate-200" />
-                <p className="text-slate-400 font-medium">No vitals recorded in your shift yet.</p>
-              </div>
+              <div className="p-12 text-center text-slate-400 italic text-sm">No pending medications for your ward.</div>
             )}
+          </Card>
+
+          <div className="flex items-center gap-2 px-1 mb-4">
+             <div className="w-2 h-6 bg-amber-500 rounded-full" />
+             <h3 className="text-xl font-black text-slate-800 tracking-tight">Triage Priority Queue</h3>
+          </div>
+          <Card className="border-0 shadow-xl shadow-slate-200/50 rounded-2xl overflow-hidden ring-1 ring-slate-100 bg-white">
+             {stats?.triage?.length > 0 ? stats.triage.map((t) => (
+               <div key={t.id} className="p-5 flex items-center justify-between border-b border-slate-50 last:border-0">
+                  <div className="flex items-center gap-4">
+                     <div className={`w-3 h-3 rounded-full ${t.priority === 'critical' ? 'bg-rose-500 animate-ping' : t.priority === 'urgent' ? 'bg-amber-500' : 'bg-emerald-500'}`} />
+                     <div>
+                        <p className="font-black text-slate-800">{t.patient_name}</p>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Score: {t.priority_score}</p>
+                     </div>
+                  </div>
+                  <Badge variant={t.priority === 'critical' ? 'destructive' : t.priority === 'urgent' ? 'warning' : 'success'} className="border-0 uppercase text-[9px] font-black">
+                     {t.priority}
+                  </Badge>
+                  <Link to="/dashboard/nurse/vitals">
+                    <Button variant="ghost" className="text-teal-600 font-black uppercase text-[10px] tracking-widest">Start Vitals</Button>
+                  </Link>
+               </div>
+             )) : (
+               <div className="p-12 text-center text-slate-400 italic text-sm">Waiting for incoming triage cases...</div>
+             )}
           </Card>
         </div>
 

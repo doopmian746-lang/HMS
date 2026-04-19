@@ -16,6 +16,10 @@ import {
 export default function AuditLogs() {
   const [searchTerm, setSearchTerm] = useState('')
   const [tableFilter, setTableFilter] = useState('all')
+  const [actionFilter, setActionFilter] = useState('all')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
+  const [showFilters, setShowFilters] = useState(false)
 
   // Fetch audit logs
   const { data: logs, isLoading } = useQuery({
@@ -31,11 +35,47 @@ export default function AuditLogs() {
   // Get unique tables for filtering
   const tables = [...new Set(logs?.map(l => l.table_name) || [])]
 
-  const filteredLogs = logs?.filter(l => 
-    l.profiles?.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    l.action?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    l.id?.includes(searchTerm)
-  )
+  const filteredLogs = logs?.filter(l => {
+    const matchesSearch = l.profiles?.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                          l.action?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                          l.id?.includes(searchTerm)
+    
+    const matchesAction = actionFilter === 'all' || l.action === actionFilter
+    
+    const logDate = new Date(l.timestamp)
+    const matchesFrom = !dateFrom || logDate >= new Date(dateFrom)
+    const matchesTo = !dateTo || logDate <= new Date(dateTo)
+    
+    return matchesSearch && matchesAction && matchesFrom && matchesTo
+  })
+
+  // Export functionality
+  const exportToCSV = () => {
+    if (!filteredLogs?.length) return
+    
+    const headers = ['Timestamp', 'User ID', 'Full Name', 'Action', 'Table', 'Details']
+    const rows = filteredLogs.map(l => [
+      new Date(l.timestamp).toLocaleString(),
+      l.user_id,
+      l.profiles?.full_name || 'System',
+      l.action,
+      l.table_name,
+      l.record_id || 'N/A'
+    ])
+    
+    const csvContent = [headers, ...rows]
+      .map(e => e.join(","))
+      .join("\n")
+    
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement("a")
+    link.setAttribute("href", url)
+    link.setAttribute("download", `audit_log_${new Date().toISOString().split('T')[0]}.csv`)
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+  }
 
   const getActionColor = (action) => {
     switch (action) {
@@ -53,11 +93,59 @@ export default function AuditLogs() {
           <h2 className="text-2xl font-bold text-slate-900 tracking-tight">System Audit logs</h2>
           <p className="text-sm text-slate-500 font-medium">Tracking all database modifications for security and compliance.</p>
         </div>
-        <Button variant="outline" className="gap-2">
-          <Download className="w-4 h-4" />
-          Export Logs (CSV)
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" className="gap-2 bg-white" onClick={() => setShowFilters(!showFilters)}>
+            <Filter className="w-4 h-4" />
+            {showFilters ? 'Hide Filters' : 'Show Filters'}
+          </Button>
+          <Button variant="dark" className="gap-2 shadow-lg shadow-slate-900/20" onClick={exportToCSV}>
+            <Download className="w-4 h-4" />
+            Export Logs (CSV)
+          </Button>
+        </div>
       </div>
+
+      {showFilters && (
+        <Card className="border-slate-200 shadow-xl shadow-slate-200/40 animate-in slide-in-from-top-4 duration-300">
+          <div className="p-6 grid grid-cols-1 md:grid-cols-4 gap-6">
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Action Type</label>
+              <select 
+                className="w-full h-10 bg-slate-50 border border-slate-200 rounded-lg px-3 text-sm font-bold appearance-none cursor-pointer"
+                value={actionFilter}
+                onChange={e => setActionFilter(e.target.value)}
+              >
+                <option value="all">All Actions</option>
+                <option value="INSERT">INSERT</option>
+                <option value="UPDATE">UPDATE</option>
+                <option value="DELETE">DELETE</option>
+                <option value="LOGIN">LOGIN</option>
+              </select>
+            </div>
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Date From</label>
+              <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="bg-slate-50" />
+            </div>
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Date To</label>
+              <Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="bg-slate-50" />
+            </div>
+            <div className="flex items-end gap-2">
+              <Button 
+                variant="ghost" 
+                className="flex-1 text-[10px] font-black uppercase text-rose-600 hover:bg-rose-50"
+                onClick={() => {
+                  setActionFilter('all')
+                  setDateFrom('')
+                  setDateTo('')
+                }}
+              >
+                Clear Filters
+              </Button>
+            </div>
+          </div>
+        </Card>
+      )}
 
       <Card className="border-slate-200/60 shadow-sm overflow-hidden">
         <CardHeader className="bg-slate-50/50 border-b border-slate-100">

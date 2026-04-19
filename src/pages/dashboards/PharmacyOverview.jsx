@@ -3,30 +3,57 @@ import { supabase } from '../../lib/supabase'
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/Card'
 import { Button } from '../../components/ui/Button'
 import { 
-  Pill, Package, ShoppingCart, AlertCircle, 
-  Clock, CheckCircle2, TrendingUp, ChevronRight,
-  Activity, RotateCcw
+  Activity, RotateCcw, Calendar, Plus, Save, X, Search,
+  RefreshCw, ShieldCheck
 } from 'lucide-react'
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 
 export default function PharmacyOverview() {
+  const [showPurchaseModal, setShowPurchaseModal] = useState(false)
+  const [purchaseItem, setPurchaseItem] = useState({ medicine_name: '', quantity: 100, unit_price: 10 })
+
   // Fetch statistics
   const { data: stats, isLoading } = useQuery({
-    queryKey: ['pharmacy-stats'],
+    queryKey: ['pharmacy-overview-stats'],
     queryFn: async () => {
       const { data: prescriptions } = await supabase.from('prescriptions').select('status')
-      const { data: inventory } = await supabase.from('pharmacy_inventory').select('quantity_in_stock, reorder_level')
+      const { data: inventory } = await supabase.from('pharmacy_inventory').select('*')
 
       const pendingCount = prescriptions?.filter(p => p.status === 'pending').length || 0
       const lowStockCount = inventory?.filter(i => i.quantity_in_stock <= i.reorder_level).length || 0
-      const dispensedToday = prescriptions?.filter(p => p.status === 'dispensed').length || 0 // Simplified 'today' logic
+      
+      const today = new Date()
+      const thirtyDaysFromNow = new Date()
+      thirtyDaysFromNow.setDate(today.getDate() + 30)
+
+      const nearExpiry = inventory?.filter(i => {
+        const expiry = new Date(i.expiry_date)
+        return expiry <= thirtyDaysFromNow && expiry >= today
+      }).length || 0
 
       return [
         { label: 'Pending Queue', value: pendingCount, icon: Clock, color: 'text-amber-500', bg: 'bg-amber-50', desc: 'Prescriptions awaiting dispense' },
         { label: 'Stock Alerts', value: lowStockCount, icon: AlertCircle, color: 'text-rose-500', bg: 'bg-rose-50', desc: 'Items below reorder level' },
-        { label: 'Dispensed Today', value: dispensedToday, icon: CheckCircle2, color: 'text-teal-600', bg: 'bg-teal-50', desc: 'Successfully fulfilled orders' },
-        { label: 'Total Inventory', value: inventory?.length || 0, icon: Package, color: 'text-indigo-600', bg: 'bg-indigo-50', desc: 'Registered medical items' },
+        { label: 'Near Expiry', value: nearExpiry, icon: Calendar, color: 'text-orange-500', bg: 'bg-orange-50', desc: 'Expiring within 30 days' },
+        { label: 'Inventory Count', value: inventory?.length || 0, icon: Package, color: 'text-indigo-600', bg: 'bg-indigo-50', desc: 'Total registered SKUs' },
       ]
+    }
+  })
+
+  const addStockMutation = useMutation({
+    mutationFn: async (payload) => {
+      // Find item or error out for simplicity
+      const { data: existing } = await supabase.from('pharmacy_inventory').select('*').eq('medicine_name', payload.medicine_name).single()
+      if (existing) {
+        await supabase.from('pharmacy_inventory').update({ quantity_in_stock: Number(existing.quantity_in_stock) + Number(payload.quantity) }).eq('id', existing.id)
+      } else {
+        await supabase.from('pharmacy_inventory').insert([payload])
+      }
+    },
+    onSuccess: () => {
+      setShowPurchaseModal(false)
+      alert("Stock replenished successfully.")
     }
   })
 
@@ -51,9 +78,12 @@ export default function PharmacyOverview() {
           <p className="text-sm text-slate-500 font-bold uppercase tracking-widest text-[10px] mt-1">Resource Management • Stock Flow Control</p>
         </div>
         <div className="flex gap-2">
-           <Button variant="outline" className="h-11 px-6 border-slate-200 font-bold bg-white rounded-xl gap-2 shadow-sm text-xs">
-             <RotateCcw size={14} className="text-slate-400" />
-             Refresh Feed
+           <Button 
+             className="h-11 px-6 bg-slate-900 hover:bg-black text-white shadow-2xl shadow-slate-900/20 font-black rounded-xl gap-2 border-0 text-[10px] uppercase tracking-widest"
+             onClick={() => setShowPurchaseModal(true)}
+           >
+             <Plus size={16} />
+             New Stock Intake
            </Button>
         </div>
       </div>
@@ -181,6 +211,75 @@ export default function PharmacyOverview() {
           </Card>
         </div>
       </div>
+      {/* Stock Intake Modal */}
+      {showPurchaseModal && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <Card className="w-full max-w-lg border-0 shadow-3xl rounded-[3rem] overflow-hidden bg-white animate-in zoom-in-95 duration-300">
+            <CardHeader className="bg-slate-900 text-white p-10 relative">
+              <button 
+                onClick={() => setShowPurchaseModal(false)}
+                className="absolute top-10 right-10 text-slate-400 hover:text-white transition-colors"
+              >
+                <X size={24} />
+              </button>
+              <div className="flex items-center gap-4 mb-4">
+                <div className="w-12 h-12 bg-teal-500 rounded-2xl flex items-center justify-center shadow-lg">
+                  <Package className="text-white w-7 h-7" />
+                </div>
+                <div>
+                  <CardTitle className="text-3xl font-black tracking-tight uppercase leading-none mb-1">Stock Intake</CardTitle>
+                  <CardDescription className="text-slate-400 font-bold text-[10px] uppercase tracking-widest">Inventory Management Registry</CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="p-10 space-y-6">
+               <div className="space-y-4 text-left">
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest pl-1">Medicine Name / SKU</label>
+                  <div className="relative">
+                    <Search className="absolute left-4 top-4 w-4 h-4 text-slate-400" />
+                    <Input 
+                      placeholder="e.g. Paracetamol 500mg..."
+                      className="h-14 pl-12 bg-slate-50 border-0 rounded-2xl font-bold"
+                      value={purchaseItem.medicine_name}
+                      onChange={e => setPurchaseItem({...purchaseItem, medicine_name: e.target.value})}
+                    />
+                  </div>
+               </div>
+               <div className="grid grid-cols-2 gap-6 text-left">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest pl-1">Quantity</label>
+                    <Input 
+                      type="number"
+                      className="h-14 bg-slate-50 border-0 rounded-2xl font-black text-emerald-600"
+                      value={purchaseItem.quantity}
+                      onChange={e => setPurchaseItem({...purchaseItem, quantity: Number(e.target.value)})}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest pl-1">Unit Price (₨)</label>
+                    <Input 
+                      type="number"
+                      className="h-14 bg-slate-50 border-0 rounded-2xl font-bold"
+                      value={purchaseItem.unit_price}
+                      onChange={e => setPurchaseItem({...purchaseItem, unit_price: Number(e.target.value)})}
+                    />
+                  </div>
+               </div>
+            </CardContent>
+            <CardFooter className="p-10 pt-0 flex gap-3">
+               <Button variant="ghost" className="flex-1 h-14 rounded-2xl font-black uppercase text-[10px] tracking-widest" onClick={() => setShowPurchaseModal(false)}>Cancel</Button>
+               <Button 
+                 className="flex-1 h-14 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-2xl uppercase tracking-widest text-[10px] shadow-2xl shadow-emerald-600/30 flex items-center justify-center gap-3 border-0"
+                 onClick={() => addStockMutation.mutate(purchaseItem)}
+                 disabled={!purchaseItem.medicine_name}
+               >
+                 {addStockMutation.isPending ? <RefreshCw className="animate-spin" /> : <ShieldCheck size={18} />}
+                 Authorize Intake
+               </Button>
+            </CardFooter>
+          </Card>
+        </div>
+      )}
     </div>
   )
 }

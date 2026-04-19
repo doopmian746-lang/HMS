@@ -56,6 +56,8 @@ const NAV_CONFIG = {
   accounts: [
     { label: 'Overview', icon: LayoutDashboard, path: '/dashboard/accounts', section: 'Main' },
     { label: 'Invoicing', icon: Receipt, path: '/dashboard/accounts/invoices', section: 'Finance' },
+    { label: 'Expenses', icon: Wallet, path: '/dashboard/accounts/expenses', section: 'Finance' },
+    { label: 'Payroll', icon: Users, path: '/dashboard/accounts/payroll', section: 'Staff' },
     { label: 'Billing Reports', icon: BarChart3, path: '/dashboard/accounts/reports', section: 'Finance' },
   ],
   staff: [

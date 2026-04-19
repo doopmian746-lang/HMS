@@ -12,7 +12,7 @@ import {
   Clock, XCircle, MoreVertical, X,
   Save, Trash2, User, CreditCard,
   Wallet, Landmark, ArrowRight, RefreshCw,
-  PlusCircle, FileText, ChevronRight
+  PlusCircle, FileText, ChevronRight, Printer, RotateCcw
 } from 'lucide-react'
 
 export default function AccountInvoices() {
@@ -23,7 +23,9 @@ export default function AccountInvoices() {
   // Modals
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [showPaymentModal, setShowPaymentModal] = useState(false)
+  const [showReceiptModal, setShowReceiptModal] = useState(false)
   const [selectedInvoice, setSelectedInvoice] = useState(null)
+  const [selectedIds, setSelectedIds] = useState([])
 
   // Creation State
   const [newInvoice, setNewInvoice] = useState({
@@ -124,6 +126,45 @@ export default function AccountInvoices() {
     }
   })
 
+  // Mutation: Batch Mark Paid
+  const batchMarkPaid = useMutation({
+    mutationFn: async (ids) => {
+      const { error } = await supabase
+        .from('invoices')
+        .update({ payment_status: 'paid', paid_amount: supabase.raw('total_amount'), payment_method: 'Batch' })
+        .in('id', ids)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      setSelectedIds([])
+      queryClient.invalidateQueries(['account-invoices-full'])
+    }
+  })
+
+  // Mutation: Refund
+  const refundInvoice = useMutation({
+    mutationFn: async (id) => {
+      const { error } = await supabase
+        .from('invoices')
+        .update({ payment_status: 'refunded', paid_amount: 0 })
+        .eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries(['account-invoices-full'])
+      alert("Refund processed successfully.")
+    }
+  })
+
+  const toggleSelect = (id) => {
+    setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
+  }
+
+  const selectAll = () => {
+    if (selectedIds.length === filtered?.length) setSelectedIds([])
+    else setSelectedIds(filtered?.map(i => i.id) || [])
+  }
+
   const filtered = invoices?.filter(inv => 
     inv.patients?.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     inv.patients?.registration_no?.includes(searchTerm) ||
@@ -148,6 +189,15 @@ export default function AccountInvoices() {
           <p className="text-xs text-slate-500 font-bold uppercase tracking-widest mt-1">Accounts Receivable • Financial Records</p>
         </div>
         <div className="flex gap-2">
+           {selectedIds.length > 0 && (
+              <Button 
+                className="h-11 px-6 bg-slate-900 hover:bg-black text-white shadow-2xl shadow-slate-900/20 font-black rounded-xl gap-2 border-0 text-[10px] uppercase tracking-widest animate-in fade-in slide-in-from-right-4"
+                onClick={() => { if(confirm(`Mark ${selectedIds.length} invoices as PAID?`)) batchMarkPaid.mutate(selectedIds) }}
+              >
+                <CheckCircle2 size={16} />
+                Batch Mark Paid ({selectedIds.length})
+              </Button>
+           )}
            <Button 
             className="h-11 px-6 bg-emerald-600 hover:bg-emerald-700 text-white shadow-2xl shadow-emerald-600/20 font-black rounded-xl gap-2 border-0 text-[10px] uppercase tracking-widest"
             onClick={() => setShowCreateModal(true)}
@@ -191,10 +241,18 @@ export default function AccountInvoices() {
           <Table>
             <TableHeader className="bg-slate-50/30">
               <TableRow>
-                <TableHead className="font-black py-6 pl-8 uppercase text-[10px] tracking-widest text-slate-400">Invoice Registry</TableHead>
+                <TableHead className="py-6 pl-8 w-10">
+                   <input 
+                     type="checkbox" 
+                     className="w-4 h-4 rounded border-slate-300 accent-emerald-600" 
+                     checked={selectedIds.length === filtered?.length && filtered?.length > 0}
+                     onChange={selectAll}
+                   />
+                </TableHead>
+                <TableHead className="font-black py-6 uppercase text-[10px] tracking-widest text-slate-400">Invoice Registry</TableHead>
                 <TableHead className="font-black py-6 uppercase text-[10px] tracking-widest text-slate-400">Patient Subject</TableHead>
                 <TableHead className="font-black py-6 uppercase text-[10px] tracking-widest text-slate-400 text-center">Total Balance</TableHead>
-                <CardTitle className="font-black py-6 uppercase text-[10px] tracking-widest text-slate-400 text-center">Status</CardTitle>
+                <TableHead className="font-black py-6 uppercase text-[10px] tracking-widest text-slate-400 text-center">Status</TableHead>
                 <TableHead className="font-black py-6 uppercase text-[10px] tracking-widest text-slate-400 text-right pr-8">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -202,8 +260,16 @@ export default function AccountInvoices() {
               {isLoading ? (
                 [1,2,3,4,5].map(i => <TableRow key={i}><TableCell colSpan={5} className="h-20 animate-pulse bg-slate-50/10" /></TableRow>)
               ) : filtered?.length > 0 ? filtered.map((inv) => (
-                <TableRow key={inv.id} className="group hover:bg-slate-50/50 transition-colors border-b border-slate-50 last:border-0">
+                <TableRow key={inv.id} className={`group hover:bg-slate-50/50 transition-colors border-b border-slate-50 last:border-0 ${selectedIds.includes(inv.id) ? 'bg-emerald-50/30' : ''}`}>
                   <TableCell className="pl-8 py-6">
+                     <input 
+                       type="checkbox" 
+                       className="w-4 h-4 rounded border-slate-300 accent-emerald-600" 
+                       checked={selectedIds.includes(inv.id)}
+                       onChange={() => toggleSelect(inv.id)}
+                     />
+                  </TableCell>
+                  <TableCell className="py-6">
                     <div className="flex items-center gap-4">
                       <div className="w-12 h-12 rounded-2xl bg-white border border-slate-100 flex items-center justify-center text-emerald-600 shadow-lg shadow-slate-100/50">
                         <Receipt size={22} />
@@ -255,8 +321,28 @@ export default function AccountInvoices() {
                              setShowPaymentModal(true);
                            }}
                          >
-                           Record Payment
+                           Pay
                          </Button>
+                       )}
+                       {inv.payment_status === 'paid' && (
+                         <>
+                           <Button 
+                             variant="ghost" 
+                             size="icon" 
+                             className="h-10 w-10 text-slate-400 hover:text-emerald-600 rounded-xl"
+                             onClick={() => { setSelectedInvoice(inv); setShowReceiptModal(true); }}
+                           >
+                             <Printer size={18} />
+                           </Button>
+                           <Button 
+                             variant="ghost" 
+                             size="icon" 
+                             className="h-10 w-10 text-slate-400 hover:text-rose-600 rounded-xl"
+                             onClick={() => { if(confirm("Process full refund?")) refundInvoice.mutate(inv.id) }}
+                           >
+                             <RotateCcw size={18} />
+                           </Button>
+                         </>
                        )}
                        <Button variant="ghost" size="icon" className="h-10 w-10 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-xl">
                          <ChevronRight size={20} />
@@ -483,6 +569,60 @@ export default function AccountInvoices() {
                </Button>
             </CardFooter>
           </Card>
+        </div>
+      )}
+
+      {/* Thermal Receipt Modal */}
+      {showReceiptModal && selectedInvoice && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xl z-[100] flex items-center justify-center p-4">
+          <div className="w-[320px] bg-white text-slate-900 p-8 shadow-2xl rounded-lg animate-in zoom-in-95 duration-200 font-mono text-xs">
+             <div className="text-center border-b-2 border-dashed border-slate-200 pb-4 mb-4">
+                <h3 className="text-sm font-black uppercase">MedCare Pro HMS</h3>
+                <p className="font-bold">Clinical Care Center</p>
+                <p>Tax Reg: 8273-HF-92</p>
+             </div>
+             
+             <div className="space-y-1 mb-4">
+                <div className="flex justify-between"><span>DATE:</span> <span>{new Date(selectedInvoice.created_at).toLocaleDateString()}</span></div>
+                <div className="flex justify-between"><span>RECEIPT:</span> <span>#{selectedInvoice.id.split('-')[0].toUpperCase()}</span></div>
+                <div className="flex justify-between"><span>PATIENT:</span> <span className="text-right truncate ml-4 font-black">{selectedInvoice.patients?.full_name}</span></div>
+             </div>
+
+             <div className="border-b border-dashed border-slate-200 pb-4 mb-4">
+                <div className="flex justify-between font-black mb-2 uppercase text-[10px] tracking-wider">
+                   <span>Description</span>
+                   <span>Price</span>
+                </div>
+                {selectedInvoice.invoice_items?.map((item, i) => (
+                  <div key={i} className="flex justify-between">
+                     <span>{item.description} (x{item.quantity})</span>
+                     <span>₨{(item.quantity * item.unit_price).toLocaleString()}</span>
+                  </div>
+                ))}
+             </div>
+
+             <div className="space-y-1 mb-6">
+                <div className="flex justify-between text-sm font-black">
+                   <span>TOTAL AMT:</span>
+                   <span>₨{Number(selectedInvoice.total_amount).toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between">
+                   <span>PAID VIA {selectedInvoice.payment_method?.toUpperCase() || 'CASH'}:</span>
+                   <span>₨{Number(selectedInvoice.paid_amount).toLocaleString()}</span>
+                </div>
+             </div>
+
+             <div className="text-center border-t-2 border-dashed border-slate-200 pt-4 opacity-50 space-y-1">
+                <p className="uppercase text-[9px] font-bold">This is a computer generated receipt</p>
+                <p className="uppercase text-[9px] font-bold">No signature required</p>
+                <p className="text-[14px] mt-4 font-black">THANK YOU</p>
+             </div>
+
+             <div className="flex gap-2 mt-8 print:hidden">
+                <Button variant="ghost" className="flex-1 rounded-xl h-10 font-black text-[10px] uppercase border" onClick={() => setShowReceiptModal(false)}>Close</Button>
+                <Button className="flex-1 bg-slate-900 text-white rounded-xl h-10 font-black text-[10px] uppercase shadow-lg shadow-slate-900/20" onClick={() => window.print()}>Print</Button>
+             </div>
+          </div>
         </div>
       )}
     </div>

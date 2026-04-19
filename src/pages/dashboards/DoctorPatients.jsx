@@ -14,6 +14,9 @@ import {
 
 export default function DoctorPatients() {
   const [searchTerm, setSearchTerm] = useState('')
+  const [genderFilter, setGenderFilter] = useState('all')
+  const [ageFilter, setAgeFilter] = useState('all')
+  const [showFilters, setShowFilters] = useState(false)
 
   // Fetch patients
   const { data: patients, isLoading } = useQuery({
@@ -27,10 +30,20 @@ export default function DoctorPatients() {
     }
   })
 
-  const filteredPatients = patients?.filter(p => 
-    p.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    p.registration_no?.includes(searchTerm)
-  )
+  const filteredPatients = patients?.filter(p => {
+    const matchesSearch = p.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                          p.registration_no?.includes(searchTerm)
+    
+    const matchesGender = genderFilter === 'all' || p.gender?.toLowerCase() === genderFilter
+    
+    let matchesAge = true
+    const age = new Date().getFullYear() - new Date(p.date_of_birth).getFullYear()
+    if (ageFilter === 'child') matchesAge = age < 18
+    else if (ageFilter === 'adult') matchesAge = age >= 18 && age < 60
+    else if (ageFilter === 'senior') matchesAge = age >= 60
+
+    return matchesSearch && matchesGender && matchesAge
+  })
 
   return (
     <div className="space-y-6">
@@ -54,12 +67,46 @@ export default function DoctorPatients() {
               />
             </div>
             <div className="flex items-center gap-2">
-              <Button variant="outline" className="gap-2 bg-white">
-                <Users className="w-4 h-4" />
-                All Patients
+              <Button 
+                variant="outline" 
+                className={`gap-2 ${showFilters ? 'bg-slate-900 text-white' : 'bg-white'}`}
+                onClick={() => setShowFilters(!showFilters)}
+              >
+                <Filter className="w-4 h-4" />
+                Filters
               </Button>
             </div>
           </div>
+
+          {showFilters && (
+            <div className="mt-4 p-4 bg-white rounded-xl border border-slate-200 grid grid-cols-1 md:grid-cols-2 gap-4 animate-in slide-in-from-top-2">
+               <div className="space-y-1.5">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Gender</label>
+                  <select 
+                    className="w-full h-10 bg-slate-50 border border-slate-200 rounded-lg px-3 text-sm font-bold appearance-none cursor-pointer"
+                    value={genderFilter}
+                    onChange={e => setGenderFilter(e.target.value)}
+                  >
+                    <option value="all">All Genders</option>
+                    <option value="male">Male</option>
+                    <option value="female">Female</option>
+                  </select>
+               </div>
+               <div className="space-y-1.5">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Age Group</label>
+                  <select 
+                    className="w-full h-10 bg-slate-50 border border-slate-200 rounded-lg px-3 text-sm font-bold appearance-none cursor-pointer"
+                    value={ageFilter}
+                    onChange={e => setAgeFilter(e.target.value)}
+                  >
+                    <option value="all">All Ages</option>
+                    <option value="child">Child (&lt;18)</option>
+                    <option value="adult">Adult (18-59)</option>
+                    <option value="senior">Senior (60+)</option>
+                  </select>
+               </div>
+            </div>
+          )}
         </CardHeader>
         <CardContent className="p-0">
           <Table>
@@ -67,8 +114,8 @@ export default function DoctorPatients() {
               <TableRow>
                 <TableHead className="font-bold py-4">Patient Profile</TableHead>
                 <TableHead className="font-bold py-4">Reg No</TableHead>
-                <TableHead className="font-bold py-4 text-center">Contact</TableHead>
-                <TableHead className="font-bold py-4 text-center">Medical Basics</TableHead>
+                <TableHead className="font-bold py-4">Last Visit</TableHead>
+                <TableHead className="font-bold py-4 text-center">Status</TableHead>
                 <TableHead className="font-bold py-4 text-right pr-6">Records</TableHead>
               </TableRow>
             </TableHeader>
@@ -97,15 +144,15 @@ export default function DoctorPatients() {
                       {patient.registration_no}
                     </code>
                   </TableCell>
-                  <TableCell className="text-center">
-                    <div className="flex items-center justify-center gap-1.5 text-xs text-slate-600 font-bold">
-                      <Phone className="w-3 h-3 text-slate-400" />
-                      {patient.phone || 'N/A'}
+                  <TableCell>
+                    <div className="text-xs font-bold text-slate-600">
+                       {patient.last_visit_date || 'New Admission'}
+                       <div className="text-[10px] text-slate-400 font-medium">Joined: {patient.registration_date || '2024-01-01'}</div>
                     </div>
                   </TableCell>
                   <TableCell className="text-center">
-                    <Badge variant="secondary" className="bg-rose-50 text-rose-700 border-rose-100 font-bold text-[10px] uppercase">
-                      {patient.blood_group || 'O+'}
+                    <Badge variant={patient.is_active !== false ? 'success' : 'secondary'} className="font-bold text-[10px] uppercase border-0 h-6">
+                      {patient.is_active !== false ? 'Active' : 'Inactive'}
                     </Badge>
                   </TableCell>
                   <TableCell className="text-right pr-6">

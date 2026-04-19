@@ -52,8 +52,9 @@ import LaboratoryRevenue from './pages/dashboards/LaboratoryRevenue'
 
 // Accounts Views
 import AccountsOverview from './pages/dashboards/AccountsOverview'
-import AccountInvoices from './pages/dashboards/AccountInvoices'
 import AccountReports from './pages/dashboards/AccountReports'
+import AccountExpenses from './pages/dashboards/AccountExpenses'
+import AccountPayroll from './pages/dashboards/AccountPayroll'
 
 function App() {
   return (
@@ -154,6 +155,8 @@ function App() {
             <Route index element={<AccountsOverview />} />
             <Route path="invoices" element={<AccountInvoices />} />
             <Route path="reports" element={<AccountReports />} />
+            <Route path="expenses" element={<AccountExpenses />} />
+            <Route path="payroll" element={<AccountPayroll />} />
           </Route>
 
           {/* Default redirect */}

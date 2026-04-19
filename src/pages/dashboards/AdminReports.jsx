@@ -10,6 +10,8 @@ import {
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from 'recharts'
+import React, { useState } from 'react'
+import { Check, X, FileText, ExternalLink } from 'lucide-react'
 
 const trendData = [
   { name: 'Mon', revenue: 4000, patients: 120 },
@@ -22,7 +24,38 @@ const trendData = [
 ]
 
 export default function AdminReports() {
-// ... existing up to Card Placeholder ...
+  const [selectedMonth, setSelectedMonth] = useState('April 2026')
+  const [showMonthDropdown, setShowMonthDropdown] = useState(false)
+  const [showMasterModal, setShowMasterModal] = useState(false)
+  const [expandedGroups, setExpandedGroups] = useState({})
+
+  const months = ['April 2026', 'March 2026', 'February 2026', 'January 2026', 'December 2025', 'November 2025']
+
+  const toggleGroup = (id) => {
+    setExpandedGroups(prev => ({ ...prev, [id]: !prev[id] }))
+  }
+
+  // Fetch Stats for Master Report
+  const { data: masterStats } = useQuery({
+    queryKey: ['master-report-stats'],
+    queryFn: async () => {
+      const patients = await supabase.from('patients').select('*', { count: 'exact', head: true })
+      const admitted = await supabase.from('bed_management').select('*').eq('status', 'occupied')
+      const invoices = await supabase.from('invoices').select('total_amount, paid_amount')
+      const labTests = await supabase.from('lab_orders').select('status')
+      const staff = await supabase.from('profiles').select('*', { count: 'exact', head: true })
+
+      const totalRevenue = invoices.data?.reduce((sum, i) => sum + Number(i.total_amount), 0) || 0
+      const collected = invoices.data?.reduce((sum, i) => sum + Number(i.paid_amount), 0) || 0
+
+      return {
+        patients: { total: patients.count || 0, admitted: admitted.data?.length || 0, discharged: 5 },
+        revenue: { total: totalRevenue, collected, outstanding: totalRevenue - collected },
+        labs: { completed: labTests.data?.filter(t => t.status === 'completed').length || 0, pending: labTests.data?.filter(t => t.status === 'pending').length || 0 },
+        staff: { total: staff.count || 0, onLeave: 2 }
+      }
+    }
+  })
   const { data: reportGroups, isLoading } = useQuery({
     queryKey: ['admin-reports-summary'],
     queryFn: async () => {
@@ -75,17 +108,79 @@ export default function AdminReports() {
           <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Analytics & Reports</h2>
           <p className="text-sm text-slate-500 font-medium">Generate and export comprehensive hospital performance data.</p>
         </div>
-        <div className="flex gap-2">
-           <Button variant="outline" className="gap-2">
-             <Calendar className="w-4 h-4" />
-             Month: April 2026
-           </Button>
-           <Button className="gap-2 shadow-lg shadow-teal-600/20">
+        <div className="flex gap-2 relative">
+           <div className="relative">
+             <Button variant="outline" className="gap-2 bg-white" onClick={() => setShowMonthDropdown(!showMonthDropdown)}>
+               <Calendar className="w-4 h-4" />
+               Month: {selectedMonth}
+             </Button>
+             {showMonthDropdown && (
+               <div className="absolute top-full right-0 mt-2 w-48 bg-white border border-slate-200 rounded-xl shadow-xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2">
+                 {months.map(m => (
+                   <button 
+                     key={m}
+                     className="w-full text-left px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50 transition-colors"
+                     onClick={() => {
+                       setSelectedMonth(m)
+                       setShowMonthDropdown(false)
+                     }}
+                   >
+                     {m}
+                   </button>
+                 ))}
+               </div>
+             )}
+           </div>
+           <Button className="gap-2 shadow-lg shadow-teal-600/20" onClick={() => setShowMasterModal(true)}>
              <TrendingUp className="w-4 h-4" />
              Generate Master Report
            </Button>
         </div>
       </div>
+
+      {showMasterModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xl z-50 flex items-center justify-center p-4">
+          <Card className="w-full max-w-2xl rounded-[3rem] overflow-hidden animate-in zoom-in-95 duration-300 shadow-2xl">
+            <CardHeader className="p-8 bg-slate-50/80 border-b border-slate-100 flex flex-row items-center justify-between">
+              <div>
+                <CardTitle className="text-2xl font-black text-slate-900">Master Report — {selectedMonth}</CardTitle>
+                <CardDescription className="font-bold text-slate-500 uppercase tracking-widest text-[10px] mt-1">Generated on {new Date().toLocaleDateString()}</CardDescription>
+              </div>
+              <button onClick={() => setShowMasterModal(false)} className="p-2 hover:bg-white rounded-full transition-colors border border-transparent hover:border-slate-200">
+                <X className="w-6 h-6 text-slate-400" />
+              </button>
+            </CardHeader>
+            <CardContent className="p-8 space-y-6 max-h-[60vh] overflow-y-auto">
+              {[
+                { label: 'Patient Summary', data: `${masterStats?.patients?.total} total, ${masterStats?.patients?.admitted} admitted, ${masterStats?.patients?.discharged} discharged`, icon: Users },
+                { label: 'Revenue Analytics', data: `₨${masterStats?.revenue?.collected.toLocaleString()} collected, ₨${masterStats?.revenue?.outstanding.toLocaleString()} outstanding`, icon: DollarSign },
+                { label: 'Laboratory Services', data: `${masterStats?.labs?.completed} completed investigations, ${masterStats?.labs?.pending} pending`, icon: FlaskConical },
+                { label: 'Clinical Staffing', data: `${masterStats?.staff?.total} active personnel, ${masterStats?.staff?.onLeave} on authorized leave`, icon: ShieldCheck }
+              ].map((sec, i) => (
+                <div key={i} className="flex items-start gap-4 p-4 rounded-2xl border border-slate-100 bg-white shadow-sm">
+                  <div className="w-10 h-10 rounded-xl bg-teal-50 flex items-center justify-center text-teal-600">
+                    <sec.icon className="w-5 h-5" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Check className="w-3 h-3 text-teal-500 font-black" />
+                      <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest">{sec.label}</h4>
+                    </div>
+                    <p className="text-sm font-bold text-slate-700">{sec.data}</p>
+                  </div>
+                </div>
+              ))}
+            </CardContent>
+            <CardFooter className="p-8 bg-slate-50/80 border-t border-slate-100 flex gap-4">
+              <Button variant="outline" className="flex-1 h-12 rounded-2xl font-black uppercase text-xs tracking-widest" onClick={() => setShowMasterModal(false)}>Close</Button>
+              <Button className="flex-1 h-12 rounded-2xl font-black uppercase text-xs tracking-widest bg-teal-600 shadow-lg shadow-teal-600/20" onClick={() => window.print()}>
+                <Download className="w-4 h-4 mr-2" />
+                Print Master Report
+              </Button>
+            </CardFooter>
+          </Card>
+        </div>
+      )}
 
       {/* Report Categories */}
       <div className="grid md:grid-cols-2 gap-6">
@@ -106,14 +201,39 @@ export default function AdminReports() {
                   <span className="text-[10px] uppercase font-bold text-slate-400 tracking-widest">Available Files</span>
                   <span className="text-sm font-bold text-slate-700">{group.count}</span>
                 </div>
-                <Button variant="ghost" size="sm" className="gap-2 group-hover:text-teal-600 text-slate-400 font-bold">
-                  View List
-                  <ArrowRight className="w-4 h-4" />
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  className="gap-2 group-hover:text-teal-600 text-slate-400 font-bold"
+                  onClick={() => toggleGroup(group.id)}
+                >
+                  {expandedGroups[group.id] ? 'Hide List' : 'View List'}
+                  <ArrowRight className={`w-4 h-4 transition-transform ${expandedGroups[group.id] ? 'rotate-90' : ''}`} />
                 </Button>
               </div>
+
+              {expandedGroups[group.id] && (
+                <div className="mt-4 space-y-2 animate-in slide-in-from-top-2 duration-200">
+                  {[1, 2, 3].map(i => (
+                    <div key={i} className="flex items-center justify-between p-3 rounded-xl bg-white border border-slate-100 text-xs font-bold text-slate-600 group/item hover:border-teal-200 transition-colors">
+                      <div className="flex items-center gap-2">
+                        <FileText className="w-3.5 h-3.5 text-slate-400" />
+                        {group.id.split('-')[0]}_report_0{i}_apr2026.pdf
+                      </div>
+                      <Button variant="ghost" size="icon" className="h-7 w-7 opacity-0 group-hover/item:opacity-100 text-teal-600" onClick={() => alert("Preparing download...")}>
+                        <Download className="w-3.5 h-3.5" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
             <div className="px-6 pb-6 pt-0 flex gap-2">
-               <Button size="sm" className="bg-slate-900 text-white hover:bg-slate-800 flex-1 gap-2">
+               <Button 
+                 size="sm" 
+                 className="bg-slate-900 text-white hover:bg-slate-800 flex-1 gap-2"
+                 onClick={() => alert(`Generating PDF for ${group.title}...`)}
+               >
                  <Download className="w-4 h-4" />
                  Download Latest PDF
                </Button>

@@ -49,3 +49,45 @@
     @apply bg-background text-foreground font-sans antialiased;
   }
 }
+
+@media print {
+  /* Hide navigation elements */
+  .sidebar,
+  nav,
+  [data-sidebar],
+  .navbar,
+  .no-print,
+  button:not(.print-btn) {
+    display: none !important;
+  }
+  
+  /* Full width print area */
+  .print-area,
+  main,
+  .dashboard-content {
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 16px !important;
+  }
+  
+  /* Clean white background */
+  body, * {
+    background: white !important;
+    color: black !important;
+    box-shadow: none !important;
+  }
+  
+  /* Page break rules */
+  .page-break-before {
+    page-break-before: always;
+  }
+  .no-page-break {
+    page-break-inside: avoid;
+  }
+  
+  /* Print-specific sizing */
+  @page {
+    margin: 1cm;
+    size: A4;
+  }
+}

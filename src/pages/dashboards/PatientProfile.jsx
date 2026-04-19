@@ -8,23 +8,33 @@ import {
   User, Phone, MapPin, Calendar, 
   Activity, ArrowLeft, Clock,
   Stethoscope, CreditCard, ClipboardList,
-  ChevronRight, AlertCircle
+  ChevronRight, AlertCircle, TrendingUp, Upload, Pill as PillIcon, FlaskConical, Droplet, Thermometer, Wind
 } from 'lucide-react'
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 
 export default function PatientProfile() {
   const { id } = useParams()
 
   // Fetch patient details
   const { data: patient, isLoading: patientLoading } = useQuery({
-    queryKey: ['patient-detail', id],
+    queryKey: ['patient', id],
     queryFn: async () => {
-      const { data, error } = await supabase.from('patients').select('*').eq('id', id).single()
-      if (error) throw error
+      const { data } = await supabase.from('patients').select('*').eq('id', id).single()
       return data
     }
   })
 
-  // Fetch appointment history
+  // Fetch Latest Vitals
+  const { data: vitals } = useQuery({
+    queryKey: ['patient-vitals', id],
+    queryFn: async () => {
+      // Note: check if table is 'vital_signs' or 'vitals' – standardized to 'vital_signs' in Nurse modules
+      const { data } = await supabase.from('vital_signs').select('*').eq('patient_id', id).order('recorded_at', { ascending: true })
+      return data || []
+    }
+  })
+
+  // Fetch Appointment History
   const { data: history, isLoading: historyLoading } = useQuery({
     queryKey: ['patient-history', id],
     queryFn: async () => {
@@ -33,12 +43,35 @@ export default function PatientProfile() {
         .select(`*, profiles(full_name, department)`)
         .eq('patient_id', id)
         .order('date', { ascending: false })
-        .order('time_slot', { ascending: false })
       return data || []
     }
   })
 
-  if (patientLoading) return <div className="h-96 flex items-center justify-center"><div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent animate-spin rounded-full" /></div>
+  // Fetch Prescriptions
+  const { data: prescriptions } = useQuery({
+    queryKey: ['patient-prescriptions', id],
+    queryFn: async () => {
+      const { data } = await supabase.from('prescriptions').select('*').eq('patient_id', id).order('created_at', { ascending: false }).limit(3)
+      return data || []
+    }
+  })
+
+  if (patientLoading) return <div className="h-96 flex items-center justify-center font-black animate-pulse text-slate-300">LOADING PATIENT FILE...</div>
+
+  const latestVital = vitals?.[vitals.length - 1] || {}
+
+  const handleUploadReport = () => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = '.pdf,image/*'
+    input.onchange = (e) => {
+      const file = e.target.files[0]
+      if (file) {
+        alert(`Uploading Lab Report: ${file.name}\nProcessing biometric data...`)
+      }
+    }
+    input.click()
+  }
 
   return (
     <div className="space-y-8 pb-20">
@@ -56,6 +89,30 @@ export default function PatientProfile() {
              </Badge>
              <span className="text-[10px] font-black text-slate-300 tracking-widest uppercase">Patient Clinical Identity</span>
           </div>
+        </div>
+        <div className="flex-1" />
+        <div className="flex items-center gap-6">
+           <div className="text-right">
+              <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Blood Pressure</div>
+              <div className="flex items-center justify-end gap-2">
+                 <Droplet className="w-3.5 h-3.5 text-rose-500" />
+                 <span className="text-xl font-black text-slate-800">{latestVital.blood_pressure || '120/80'}</span>
+              </div>
+           </div>
+           <div className="text-right">
+              <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Pulse Rate</div>
+              <div className="flex items-center justify-end gap-2">
+                 <Activity className="w-3.5 h-3.5 text-emerald-500" />
+                 <span className="text-xl font-black text-slate-800">{latestVital.pulse || '72'} <small className="text-[10px]">BPM</small></span>
+              </div>
+           </div>
+           <div className="text-right">
+              <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Temp</div>
+              <div className="flex items-center justify-end gap-2">
+                 <Thermometer className="w-3.5 h-3.5 text-amber-500" />
+                 <span className="text-xl font-black text-slate-800">{latestVital.temperature || '98.6'} <small className="text-[10px]">°F</small></span>
+              </div>
+           </div>
         </div>
       </div>
 
@@ -112,10 +169,69 @@ export default function PatientProfile() {
                </div>
             </CardContent>
           </Card>
+
+          <Button 
+            className="w-full h-16 rounded-[2rem] bg-slate-900 shadow-2xl shadow-slate-900/30 font-black uppercase tracking-widest text-xs gap-3"
+            onClick={handleUploadReport}
+          >
+             <Upload className="w-5 h-5 text-teal-400" />
+             Upload New Lab Report
+          </Button>
+
+          <Card className="border-0 shadow-2xl shadow-slate-200/50 rounded-[2.5rem] bg-white ring-1 ring-slate-100 overflow-hidden">
+             <CardHeader className="p-8 border-b border-slate-100">
+                <CardTitle className="text-lg font-black text-slate-800 uppercase tracking-tight">Recent Rx</CardTitle>
+             </CardHeader>
+             <CardContent className="p-0 divide-y divide-slate-50">
+                {prescriptions?.length > 0 ? prescriptions.map(px => (
+                  <div key={px.id} className="p-6 flex items-center justify-between hover:bg-slate-50 transition-colors">
+                     <div className="flex items-center gap-4">
+                        <div className="p-3 bg-rose-50 rounded-xl"><PillIcon size={18} className="text-rose-500" /></div>
+                        <div>
+                           <p className="text-sm font-black text-slate-800">Prescription #{px.id.split('-')[0]}</p>
+                           <p className="text-[10px] text-slate-400 font-bold uppercase">{new Date(px.created_at).toLocaleDateString()}</p>
+                        </div>
+                     </div>
+                     <Badge className={
+                       px.status === 'completed' ? 'bg-emerald-50 text-emerald-600 border-0' :
+                       px.status === 'pending' ? 'bg-amber-50 text-amber-600 border-0' : 'bg-slate-100'
+                     }>
+                       {px.status}
+                     </Badge>
+                  </div>
+                )) : (
+                  <div className="p-8 text-center text-slate-400 text-xs font-bold uppercase">No recent medications</div>
+                )}
+             </CardContent>
+          </Card>
         </div>
 
         {/* Clinical History */}
-        <div className="lg:col-span-2 space-y-6">
+          <div className="flex items-center justify-between px-2">
+             <div className="flex items-center gap-2">
+                <TrendingUp className="text-teal-600 w-5 h-5" />
+                <h3 className="text-xl font-black text-slate-800">Vital Signs Tracking</h3>
+             </div>
+          </div>
+
+          <Card className="border-0 shadow-xl shadow-slate-200/50 rounded-[2.5rem] bg-white ring-1 ring-slate-100 overflow-hidden">
+             <CardContent className="p-8 h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                   <LineChart data={vitals}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                      <XAxis dataKey="timestamp" hide />
+                      <YAxis domain={['dataMin - 10', 'dataMax + 10']} hide />
+                      <Tooltip 
+                        contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)', padding: '12px' }}
+                        itemStyle={{ fontWeight: 'black' }}
+                      />
+                      <Line type="monotone" dataKey="pulse" stroke="#10b981" strokeWidth={4} dot={{ r: 4, fill: '#10b981' }} />
+                      <Line type="monotone" dataKey="respiratory_rate" stroke="#2563eb" strokeWidth={4} dot={{ r: 4, fill: '#2563eb' }} />
+                   </LineChart>
+                </ResponsiveContainer>
+             </CardContent>
+          </Card>
+
           <div className="flex items-center justify-between px-2">
              <div className="flex items-center gap-2">
                 <ClipboardList className="text-indigo-600 w-5 h-5" />

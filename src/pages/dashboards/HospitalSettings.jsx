@@ -7,16 +7,17 @@ import { Input } from '../../components/ui/Input'
 import { 
   Building2, Globe, Phone, Mail, MapPin, 
   Upload, Save, RefreshCcw, ShieldCheck, 
-  Image as ImageIcon
+  Image as ImageIcon, BedDouble, CheckCircle2, AlertTriangle, XCircle
 } from 'lucide-react'
+import { Badge } from '../../components/ui/Badge'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../components/ui/Table'
 
 export default function HospitalSettings() {
   const queryClient = useQueryClient()
   const [isEditing, setIsEditing] = useState(false)
+  const [logoPreview, setLogoPreview] = useState(null)
 
   // Fetch current settings
-  const { data: settings, isLoading } = useQuery({
-    queryKey: ['hospital-settings'],
     queryFn: async () => {
       const { data } = await supabase
         .from('hospital_settings')
@@ -26,6 +27,40 @@ export default function HospitalSettings() {
       return data || { name: 'MedCare HMS Pro', currency: '₨' }
     }
   })
+
+  // Fetch Beds
+  const { data: beds } = useQuery({
+    queryKey: ['bed-management'],
+    queryFn: async () => {
+      const { data } = await supabase.from('bed_management').select('*')
+      return data || []
+    }
+  })
+
+  // Bed status mutation
+  const updateBedStatus = useMutation({
+    mutationFn: async ({ id, status }) => {
+      const { error } = await supabase
+        .from('bed_management')
+        .update({ status })
+        .eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries(['bed-management'])
+    }
+  })
+
+  const handleLogoUpload = (e) => {
+    const file = e.target.files[0]
+    if (file) {
+      const reader = new FileReader()
+      reader.onloadend = () => {
+        setLogoPreview(reader.result)
+      }
+      reader.readAsDataURL(file)
+    }
+  }
 
   // State handles for local editing (optional enhancement, here we simplify with direct form data)
   const [formData, setFormData] = useState(null)
@@ -89,10 +124,10 @@ export default function HospitalSettings() {
         <div className="grid md:grid-cols-3 gap-8">
           {/* Identity & Branding */}
           <div className="md:col-span-1 space-y-4">
-            <Card className="border-slate-200/60 shadow-sm overflow-hidden">
+Card className="border-slate-200/60 shadow-sm overflow-hidden">
                <div className="aspect-square bg-slate-50 flex flex-col items-center justify-center p-8 text-center bg-[radial-gradient(circle_at_center,_white_0%,_#f8fafc_100%)]">
-                 {settings?.logo_url ? (
-                   <img src={settings.logo_url} alt="Logo" className="w-24 h-24 object-contain mb-4" />
+                 {(logoPreview || settings?.logo_url) ? (
+                   <img src={logoPreview || settings.logo_url} alt="Logo" className="w-24 h-24 object-contain mb-4" />
                  ) : (
                    <div className="w-20 h-20 bg-teal-100 rounded-2xl flex items-center justify-center border-2 border-dashed border-teal-200 mb-4 transition-all hover:scale-105">
                      <ImageIcon className="w-8 h-8 text-teal-600" />
@@ -101,10 +136,25 @@ export default function HospitalSettings() {
                  <h4 className="text-sm font-bold text-slate-800">Hospital Logo</h4>
                  <p className="text-[10px] text-slate-400 mt-1 uppercase tracking-widest font-bold">Square 512x512 recommended</p>
                  {isEditing && (
-                   <Button variant="outline" size="sm" className="mt-4 gap-2 text-xs bg-white">
-                     <Upload className="w-3 h-3" />
-                     Upload New
-                   </Button>
+                   <div className="mt-4">
+                     <input 
+                       type="file" 
+                       id="logo-upload" 
+                       className="hidden" 
+                       accept="image/*"
+                       onChange={handleLogoUpload}
+                     />
+                     <Button 
+                       type="button"
+                       variant="outline" 
+                       size="sm" 
+                       className="gap-2 text-xs bg-white"
+                       onClick={() => document.getElementById('logo-upload').click()}
+                     >
+                       <Upload className="w-3 h-3" />
+                       Upload New
+                     </Button>
+                   </div>
                  )}
                </div>
             </Card>
@@ -215,6 +265,90 @@ export default function HospitalSettings() {
           </div>
         </div>
       </form>
+
+      {/* Bed Management Section */}
+      <div className="space-y-6">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Bed Management</h2>
+          <p className="text-sm text-slate-500 font-medium">Monitor and update facility occupancy status across wards.</p>
+        </div>
+
+        <Card className="border-slate-200/60 shadow-sm overflow-hidden">
+          <Table>
+            <TableHeader className="bg-slate-50/50">
+              <TableRow>
+                <TableHead className="text-[10px] font-black uppercase tracking-widest">Ward</TableHead>
+                <TableHead className="text-[10px] font-black uppercase tracking-widest">Bed #</TableHead>
+                <TableHead className="text-[10px] font-black uppercase tracking-widest">Status</TableHead>
+                <TableHead className="text-[10px] font-black uppercase tracking-widest">Patient / Details</TableHead>
+                <TableHead className="text-[10px] font-black uppercase tracking-widest text-right">Action</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {beds?.length > 0 ? beds.map((bed) => (
+                <TableRow key={bed.id} className="group transition-colors hover:bg-slate-50/50">
+                  <TableCell className="font-extrabold text-slate-900">{bed.ward}</TableCell>
+                  <TableCell>
+                    <Badge variant="outline" className="font-mono">{bed.bed_number}</Badge>
+                  </TableCell>
+                  <TableCell>
+                    {bed.status === 'occupied' ? (
+                      <div className="flex items-center gap-1.5 text-rose-600 font-bold text-xs uppercase tracking-tighter">
+                        <AlertTriangle className="w-3 h-3" /> Occupied
+                      </div>
+                    ) : bed.status === 'available' ? (
+                      <div className="flex items-center gap-1.5 text-emerald-600 font-bold text-xs uppercase tracking-tighter">
+                        <CheckCircle2 className="w-3 h-3" /> Available
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1.5 text-slate-400 font-bold text-xs uppercase tracking-tighter">
+                        <XCircle className="w-3 h-3" /> Maintenance
+                      </div>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-sm text-slate-500 font-medium">
+                    {bed.patient_id ? (
+                      <span className="text-slate-900">Patient ID: {bed.patient_id} <br/><span className="text-[10px] text-slate-400">Admitted: {bed.admitted_date}</span></span>
+                    ) : bed.status === 'maintenance' ? (
+                      <span className="italic">Scheduled for deep cleaning</span>
+                    ) : (
+                      <span className="opacity-30">— Available —</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {bed.status === 'maintenance' && (
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        className="text-[10px] h-7 font-black border-teal-200 text-teal-700 hover:bg-teal-50"
+                        onClick={() => updateBedStatus.mutate({ id: bed.id, status: 'available' })}
+                      >
+                        Mark Available
+                      </Button>
+                    )}
+                    {bed.status === 'available' && (
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        className="text-[10px] h-7 font-black border-slate-200 text-slate-500 hover:bg-slate-50"
+                        onClick={() => updateBedStatus.mutate({ id: bed.id, status: 'maintenance' })}
+                      >
+                        Mark Maint.
+                      </Button>
+                    )}
+                  </TableCell>
+                </TableRow>
+              )) : (
+                <TableRow>
+                  <TableCell colSpan={5} className="h-24 text-center">
+                    <p className="text-slate-400 text-sm font-bold uppercase">No beds configured found</p>
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </Card>
+      </div>
     </div>
   )
 }

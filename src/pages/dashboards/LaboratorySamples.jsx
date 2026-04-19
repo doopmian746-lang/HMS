@@ -1,245 +1,253 @@
 import React, { useState } from 'react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { supabase } from '../../lib/supabase'
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card'
+import { Button } from '../../components/ui/Button'
 import { Input } from '../../components/ui/Input'
-import { Search, Beaker, Check, X, AlertTriangle, Printer, Clock } from 'lucide-react'
+import { Badge } from '../../components/ui/Badge'
+import { 
+  Search, Beaker, Check, X, 
+  AlertTriangle, Printer, Clock, 
+  ShieldCheck, ArrowRight, User,
+  FlaskConical, RefreshCw, Barcode
+} from 'lucide-react'
 import { useAuth } from '../../contexts/AuthContext'
-
-const MOCK_QUEUE = [
-  { id: 'ORD-8492', patient: 'Alice Smith', test: 'Complete Blood Count', sampleType: 'Blood', reqTime: '10 mins ago', status: 'Pending' },
-  { id: 'ORD-8496', patient: 'David Anderson', test: 'Renal Panel', sampleType: 'Blood', reqTime: '15 mins ago', status: 'Pending' },
-  { id: 'ORD-8501', patient: 'Michael Brown', test: 'Liver Function Test', sampleType: 'Blood', reqTime: '30 mins ago', status: 'Pending' },
-]
-
-const MOCK_COLLECTED = [
-  { id: 'ORD-8493', patient: 'Robert Johnson', test: 'Lipid Profile', sampleType: 'Blood', collTime: '02:10 PM', collector: 'Staff User', condition: 'Good' },
-  { id: 'ORD-8497', patient: 'Karen Thomas', test: 'Urine Culture', sampleType: 'Urine', collTime: '02:45 PM', collector: 'Staff User', condition: 'Good' },
-]
 
 export default function LaboratorySamples() {
   const { profile } = useAuth()
-  const [queue, setQueue] = useState(MOCK_QUEUE)
-  const [collected, setCollected] = useState(MOCK_COLLECTED)
-  const [activeTab, setActiveTab] = useState('queue') // 'queue' or 'collected'
-  
+  const queryClient = useQueryClient()
+  const [activeTab, setActiveTab] = useState('queue')
   const [selectedOrder, setSelectedOrder] = useState(null)
-  const [collectionState, setCollectionState] = useState({ condition: 'Good', rejectReason: '' })
+  const [searchTerm, setSearchTerm] = useState('')
+  const [condition, setCondition] = useState('Ideal')
 
-  const handleMarkCollected = () => {
-    if (!selectedOrder) return
-
-    const newCollected = {
-      ...selectedOrder,
-      collTime: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      collector: profile?.full_name || 'Staff User',
-      condition: collectionState.condition,
-      rejectReason: collectionState.rejectReason
+  // Fetch pending queue (Orders that need collection)
+  const { data: queue, isLoading: queueLoading } = useQuery({
+    queryKey: ['lab-sample-queue'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('lab_orders')
+        .select('*, patients(full_name, registration_no)')
+        .eq('status', 'pending')
+        .order('created_at', { ascending: false })
+      if (error) throw error
+      return data || []
     }
+  })
 
-    setCollected([newCollected, ...collected])
-    setQueue(queue.filter(q => q.id !== selectedOrder.id))
-    setSelectedOrder(null)
-    setCollectionState({ condition: 'Good', rejectReason: '' })
-  }
+  // Fetch collected history
+  const { data: collected, isLoading: collectedLoading } = useQuery({
+    queryKey: ['lab-sample-history'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('lab_samples')
+        .select('*, lab_orders(test_name), patients(full_name)')
+        .order('collected_at', { ascending: false })
+        .limit(20)
+      if (error) throw error
+      return data || []
+    }
+  })
 
-  const handlePrintLabel = (e, order) => {
-    e.stopPropagation()
-    alert(`|||| || |||||||||||||||| |||||\n[BARCODE]\n${order.id} | ${order.patient}\n${order.test} | ${order.sampleType}`)
-  }
+  // Mutation: Record Collection
+  const collectMutation = useMutation({
+    mutationFn: async (order) => {
+      // 1. Create sample record
+      const { error: sampleError } = await supabase.from('lab_samples').insert([{
+        order_id: order.id,
+        patient_id: order.patient_id,
+        sample_type: order.sample_type || 'Blood',
+        status: 'collected',
+        collector_id: profile?.id,
+        condition: condition
+      }])
+      if (sampleError) throw sampleError
+
+      // 2. Update order status
+      const { error: orderError } = await supabase
+        .from('lab_orders')
+        .update({ status: 'processing' })
+        .eq('id', order.id)
+      if (orderError) throw orderError
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries(['lab-sample-queue'])
+      queryClient.invalidateQueries(['lab-sample-history'])
+      queryClient.invalidateQueries(['lab-dashboard-stats'])
+      setSelectedOrder(null)
+    }
+  })
+
+  const filteredQueue = queue?.filter(q => q.patients?.full_name?.toLowerCase().includes(searchTerm.toLowerCase()))
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+    <div className="space-y-6 pb-12">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
         <div>
-          <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Sample Collection</h1>
-          <p className="text-slate-500 text-sm font-medium mt-1">Manage active test queues and physical sample integrity</p>
+          <h2 className="text-2xl font-black text-slate-900 tracking-tight leading-none mb-1">Phlebotomy Terminal</h2>
+          <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">Sample Acquisition • Biological Asset Management</p>
         </div>
-        
-        <div className="flex bg-slate-100 p-1 rounded-lg">
-          <button 
-            onClick={() => setActiveTab('queue')}
-            className={`px-4 py-2 text-sm font-bold rounded-md transition-all ${activeTab === 'queue' ? 'bg-white text-teal-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-          >
-            Pending Queue ({queue.length})
-          </button>
-          <button 
-            onClick={() => setActiveTab('collected')}
-            className={`px-4 py-2 text-sm font-bold rounded-md transition-all ${activeTab === 'collected' ? 'bg-white text-teal-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-          >
-            Recently Collected
-          </button>
+        <div className="flex bg-slate-50 p-1 rounded-xl border border-slate-100">
+           {['queue', 'history'].map(tab => (
+             <button 
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`px-6 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === tab ? 'bg-white text-teal-600 shadow-sm ring-1 ring-slate-100' : 'text-slate-400'}`}
+             >
+               {tab === 'queue' ? `Active Queue (${queue?.length || 0})` : 'Collection Log'}
+             </button>
+           ))}
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Main List */}
-        <Card className="lg:col-span-2 border-slate-200">
-          <CardHeader className="bg-slate-50/50 border-b border-slate-100 pb-4">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-lg font-bold text-slate-800 flex items-center gap-2">
-                {activeTab === 'queue' ? <Clock className="w-5 h-5 text-indigo-600" /> : <Beaker className="w-5 h-5 text-teal-600" />}
-                {activeTab === 'queue' ? 'Attention Required' : 'Collected Samples'}
-              </CardTitle>
-              <div className="relative">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                <Input placeholder="Search patient..." className="pl-8 h-8 text-sm w-48 bg-white" />
-              </div>
-            </div>
+      <div className="grid lg:grid-cols-3 gap-6">
+        <Card className="lg:col-span-2 border-0 shadow-2xl shadow-slate-200/50 rounded-[2.5rem] bg-white ring-1 ring-slate-100 overflow-hidden">
+          <CardHeader className="p-8 border-b border-slate-50 bg-slate-50/30 flex flex-row items-center justify-between">
+             <h3 className="text-lg font-black text-slate-800 flex items-center gap-3">
+                {activeTab === 'queue' ? <Clock className="text-amber-500" /> : <ShieldCheck className="text-emerald-500" />}
+                {activeTab === 'queue' ? 'Pending Samples' : 'Archived Collections'}
+             </h3>
+             <div className="relative">
+                <Search className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
+                <Input 
+                  placeholder="Filter queue..." 
+                  className="pl-10 h-10 w-48 bg-white border-slate-200 rounded-xl font-bold text-xs"
+                  value={searchTerm}
+                  onChange={e => setSearchTerm(e.target.value)}
+                />
+             </div>
           </CardHeader>
           <CardContent className="p-0">
-            {activeTab === 'queue' ? (
-              <div className="divide-y divide-slate-100">
-                {queue.length === 0 ? (
-                  <div className="p-12 text-center text-slate-500">
-                    <Check className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-                    <p className="text-lg font-medium text-slate-600">Queue empty</p>
-                  </div>
-                ) : (
-                  queue.map((item) => (
-                    <div 
-                      key={item.id} 
-                      onClick={() => setSelectedOrder(item)}
-                      className={`p-4 flex items-center justify-between transition-colors cursor-pointer border-l-4 
-                        ${selectedOrder?.id === item.id ? 'bg-teal-50 border-teal-500' : 'hover:bg-slate-50 border-transparent'}`}
-                    >
-                      <div className="flex items-center gap-4">
-                        <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-500">
-                          <Beaker className="w-5 h-5" />
+             {activeTab === 'queue' ? (
+                <div className="divide-y divide-slate-50">
+                   {queueLoading ? [1,2,3].map(i => <div key={i} className="h-24 animate-pulse bg-slate-50/50" />) :
+                    filteredQueue?.length > 0 ? filteredQueue.map(item => (
+                      <div 
+                        key={item.id}
+                        onClick={() => setSelectedOrder(item)}
+                        className={`p-6 flex items-center justify-between cursor-pointer transition-all ${selectedOrder?.id === item.id ? 'bg-teal-50/50 border-l-4 border-teal-600' : 'hover:bg-slate-50 border-l-4 border-transparent'}`}
+                      >
+                         <div className="flex items-center gap-4 text-left">
+                            <div className="w-12 h-12 bg-slate-100 rounded-2xl flex items-center justify-center text-slate-400 group-hover:bg-white transition-colors">
+                               <Beaker size={24} />
+                            </div>
+                            <div>
+                               <div className="font-black text-slate-900 leading-none mb-1">{item.patients?.full_name}</div>
+                               <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 italic">#{item.id.split('-')[0]}</div>
+                               <Badge className="bg-white text-teal-600 border border-teal-100 font-black text-[9px] uppercase tracking-widest">{item.test_name}</Badge>
+                            </div>
+                         </div>
+                         <div className="text-right">
+                            <div className="text-[10px] font-black text-rose-500 uppercase tracking-widest mb-1 flex items-center gap-1">
+                               <RefreshCw size={10} className="animate-spin-slow" /> Awaiting Phlebotomy
+                            </div>
+                            <div className="text-xs font-bold text-slate-400">{new Date(item.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
+                         </div>
+                      </div>
+                    )) : (
+                      <div className="p-20 text-center opacity-20">
+                         <FlaskConical size={64} className="mx-auto mb-4" />
+                         <p className="font-black uppercase tracking-widest text-xs">Phlebotomy queue is clear</p>
+                      </div>
+                    )
+                   }
+                </div>
+             ) : (
+                <div className="divide-y divide-slate-50">
+                   {collected?.map(item => (
+                     <div key={item.id} className="p-6 flex items-center justify-between hover:bg-slate-50/30 transition-colors">
+                        <div className="flex items-center gap-4 text-left">
+                           <div className="w-10 h-10 bg-emerald-50 rounded-xl flex items-center justify-center text-emerald-600"><Check size={18} /></div>
+                           <div>
+                              <div className="font-black text-slate-900">{item.patients?.full_name}</div>
+                              <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{item.lab_orders?.test_name}</div>
+                           </div>
                         </div>
-                        <div>
-                          <div className="font-bold text-slate-900 leading-tight">{item.patient}</div>
-                          <div className="text-sm text-slate-600">{item.test} <span className="text-slate-400">({item.sampleType})</span></div>
-                          <div className="text-xs text-rose-500 font-medium mt-1 flex items-center gap-1">
-                            <Clock className="w-3 h-3" /> Requested {item.reqTime}
-                          </div>
+                        <div className="text-right">
+                           <Badge className="bg-slate-900 text-white font-black text-[9px] uppercase tracking-widest mb-1">Batch #{item.id.split('-')[0]}</Badge>
+                           <div className="text-[10px] font-bold text-slate-400 uppercase">Verified: {new Date(item.collected_at).toLocaleTimeString()}</div>
                         </div>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-xs font-bold text-slate-400 uppercase">{item.id}</div>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            ) : (
-              <div className="divide-y divide-slate-100">
-                {collected.map((item) => (
-                  <div key={item.id} className="p-4 flex items-center justify-between hover:bg-slate-50 transition-colors group">
-                    <div className="flex items-center gap-4">
-                      <div className={`w-10 h-10 rounded-full flex items-center justify-center
-                        ${item.condition === 'Good' ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'}
-                      `}>
-                        {item.condition === 'Good' ? <Check className="w-5 h-5" /> : <X className="w-5 h-5" />}
-                      </div>
-                      <div>
-                        <div className="font-bold text-slate-900 leading-tight">{item.patient}</div>
-                        <div className="text-sm text-slate-600">{item.test} <span className="text-slate-400">({item.sampleType})</span></div>
-                        <div className="text-xs text-slate-500 font-medium mt-1">
-                          Collected at <span className="text-slate-700">{item.collTime}</span> by <span className="text-slate-700">{item.collector}</span>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="text-right flex flex-col items-end gap-2">
-                       <span className={`px-2 py-0.5 text-[10px] font-bold uppercase rounded-full border
-                          ${item.condition === 'Good' ? 'text-emerald-700 bg-emerald-50 border-emerald-200' : 'text-rose-700 bg-rose-50 border-rose-200'}
-                       `}>
-                         {item.condition}
-                       </span>
-                       <button 
-                        onClick={(e) => handlePrintLabel(e, item)}
-                        className="text-slate-400 hover:text-teal-600 opacity-0 group-hover:opacity-100 transition-opacity"
-                        title="Print Label"
-                       >
-                         <Printer className="w-4 h-4" />
-                       </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+                     </div>
+                   ))}
+                </div>
+             )}
           </CardContent>
         </Card>
 
         {/* Action Panel */}
         <div className="space-y-6">
-          <Card className={`border-2 transition-colors ${selectedOrder ? 'border-teal-200 shadow-md' : 'border-slate-100 shadow-sm'}`}>
-            <CardHeader className={`${selectedOrder ? 'bg-teal-50' : 'bg-slate-50'} pb-3`}>
-              <CardTitle className="text-base font-bold text-slate-800">
-                Action Panel
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-5">
+           <Card className="border-0 shadow-2xl shadow-slate-200/50 rounded-[3rem] bg-slate-900 text-white p-8 relative overflow-hidden group">
+              <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:scale-110 transition-transform">
+                 <Barcode size={100} />
+              </div>
+              <h3 className="text-xl font-black mb-6 tracking-tight relative z-10">Collection Protocol</h3>
+              
               {!selectedOrder ? (
-                <div className="text-center py-8">
-                  <Beaker className="w-12 h-12 text-slate-200 mx-auto mb-3" />
-                  <p className="text-sm text-slate-500 font-medium">Select an order from the queue<br/>to record sample collection.</p>
+                <div className="p-8 text-center bg-white/5 rounded-3xl border border-white/10 backdrop-blur-md relative z-10 transition-all">
+                   <Beaker className="mx-auto mb-4 opacity-20" size={48} />
+                   <p className="text-[10px] font-black text-white/40 uppercase tracking-widest">Select an active order <br/> to initiate acquisition</p>
                 </div>
               ) : (
-                <div className="space-y-5 animate-in fade-in slide-in-from-right-4 duration-300">
-                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
-                    <h3 className="font-bold text-slate-900">{selectedOrder.patient}</h3>
-                    <p className="text-sm font-medium text-teal-700 mt-1">{selectedOrder.test}</p>
-                    <div className="flex gap-4 mt-3 pt-3 border-t border-slate-200/60">
-                      <div>
-                        <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Order ID</div>
-                        <div className="text-sm font-semibold text-slate-700">{selectedOrder.id}</div>
-                      </div>
-                      <div>
-                        <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Sample</div>
-                        <div className="text-sm font-semibold text-slate-700">{selectedOrder.sampleType}</div>
-                      </div>
-                    </div>
-                  </div>
+                <div className="space-y-6 relative z-10 animate-in fade-in slide-in-from-right-4 duration-300">
+                   <div className="p-6 bg-white/10 rounded-3xl backdrop-blur-md border border-white/10 text-left">
+                      <div className="text-[9px] font-black text-teal-400 uppercase tracking-widest mb-1">Current Target</div>
+                      <div className="font-black text-xl mb-1">{selectedOrder.patients?.full_name}</div>
+                      <div className="text-[10px] font-bold text-white/60 uppercase">{selectedOrder.test_name}</div>
+                   </div>
 
-                  <div className="space-y-3">
-                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">Sample Condition</label>
-                    <select 
-                      className="w-full h-10 px-3 bg-white border border-slate-200 rounded-lg text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500"
-                      value={collectionState.condition}
-                      onChange={(e) => setCollectionState({...collectionState, condition: e.target.value})}
-                    >
-                      <option value="Good">Good (Ideal)</option>
-                      <option value="Hemolysed">Hemolysed (Warning)</option>
-                      <option value="Insufficient">Insufficient (Warning)</option>
-                      <option value="Rejected">Rejected</option>
-                    </select>
+                   <div className="space-y-3 text-left">
+                      <label className="text-[10px] font-black text-white/40 uppercase tracking-widest ml-1">Asset Integrity</label>
+                      <select 
+                        className="w-full h-12 bg-white/5 border border-white/10 rounded-xl px-4 text-xs font-bold text-white focus:outline-none focus:ring-2 focus:ring-teal-500/50"
+                        value={condition}
+                        onChange={e => setCondition(e.target.value)}
+                      >
+                         <option className="bg-slate-900" value="Ideal">Ideal Condition</option>
+                         <option className="bg-slate-900" value="Hemolysed">Hemolysed (Danger)</option>
+                         <option className="bg-slate-900" value="Insufficient">Insufficient Vol.</option>
+                      </select>
+                   </div>
 
-                    {collectionState.condition === 'Rejected' && (
-                      <div className="animate-in fade-in slide-in-from-top-2 duration-200">
-                        <textarea 
-                          placeholder="Reason for rejection and re-collection notes..."
-                          className="w-full p-3 bg-rose-50 border border-rose-200 rounded-lg text-sm text-rose-900 placeholder:text-rose-400 focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 resize-none"
-                          rows="3"
-                          value={collectionState.rejectReason}
-                          onChange={(e) => setCollectionState({...collectionState, rejectReason: e.target.value})}
-                        />
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="pt-2">
-                    <button 
-                      onClick={handleMarkCollected}
-                      className={`w-full py-2.5 rounded-lg font-bold flex items-center justify-center gap-2 transition-colors ${
-                        collectionState.condition === 'Rejected' 
-                        ? 'bg-rose-600 hover:bg-rose-700 text-white shadow-sm shadow-rose-200' 
-                        : 'bg-teal-600 hover:bg-teal-700 text-white shadow-sm shadow-teal-200'
-                      }`}
-                    >
-                      {collectionState.condition === 'Rejected' ? <AlertTriangle className="w-4 h-4" /> : <Check className="w-4 h-4" />}
-                      {collectionState.condition === 'Rejected' ? 'Reject & Notify' : 'Verify Collection'}
-                    </button>
-                    <button 
-                      onClick={(e) => handlePrintLabel(e, selectedOrder)}
-                      className="w-full mt-2 py-2.5 rounded-lg font-bold text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 transition-colors flex items-center justify-center gap-2"
-                    >
-                      <Printer className="w-4 h-4" />
-                      Print Barcode Label
-                    </button>
-                  </div>
+                   <div className="flex flex-col gap-3">
+                      <Button 
+                        className="h-14 bg-teal-600 hover:bg-teal-700 text-white font-black rounded-2xl border-0 shadow-xl shadow-teal-600/20 uppercase tracking-widest text-[10px] flex items-center justify-center gap-2"
+                        onClick={() => collectMutation.mutate(selectedOrder)}
+                        disabled={collectMutation.isPending}
+                      >
+                         <ShieldCheck size={18} />
+                         {collectMutation.isPending ? 'Syncing...' : 'Verify & Vault Sample'}
+                      </Button>
+                      <Button 
+                        variant="outline" 
+                        className="h-14 bg-white/5 border border-white/10 text-white hover:bg-white/10 font-black rounded-2xl uppercase tracking-widest text-[10px] flex items-center justify-center gap-2"
+                        onClick={() => alert('Printing Barcode Chain...')}
+                      >
+                         <Printer size={18} />
+                         Thermal Label
+                      </Button>
+                   </div>
                 </div>
               )}
-            </CardContent>
-          </Card>
+           </Card>
+
+           <Card className="border-0 shadow-2xl shadow-slate-200/50 rounded-[2.5rem] bg-white ring-1 ring-slate-100 p-8 text-left">
+              <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Integrity Standards</h4>
+              <div className="space-y-4">
+                 {[
+                   { label: 'Asset Identification', status: 'Mandatory', icon: ShieldCheck, color: 'text-emerald-500' },
+                   { label: 'Volumetric Precision', status: 'Required', icon: Activity, color: 'text-indigo-500' },
+                   { label: 'Cold Chain Maintained', status: 'Optimal', icon: FlaskConical, color: 'text-teal-500' }
+                 ].map((s, i) => (
+                   <div key={i} className="flex items-center gap-3">
+                      <div className={`p-2 rounded-lg bg-slate-50 ${s.color}`}><s.icon size={14} /></div>
+                      <div>
+                         <div className="text-[10px] font-black text-slate-900">{s.label}</div>
+                         <div className="text-[8px] font-bold text-slate-400 uppercase leading-none">{s.status}</div>
+                      </div>
+                   </div>
+                 ))}
+              </div>
+           </Card>
         </div>
       </div>
     </div>
