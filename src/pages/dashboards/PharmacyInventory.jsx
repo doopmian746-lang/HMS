@@ -390,6 +390,8 @@ export default function PharmacyInventory() {
               </Button>
             </CardFooter>
           </Card>
+        </div>
+      )}
       {/* Batch Edit Modal */}
       {showBatchModal && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-md z-[60] flex items-center justify-center p-4">
